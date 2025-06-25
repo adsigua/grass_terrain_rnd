@@ -1,0 +1,258 @@
+StructuredBuffer<float> _DensityRead;
+RWStructuredBuffer<float> _DensityWrite;
+
+StructuredBuffer<float2> _VelocityRead;
+RWStructuredBuffer<float2> _VelocityWrite;
+
+RWStructuredBuffer<float> _Divergence;
+
+StructuredBuffer<float> _PressureRead;
+RWStructuredBuffer<float> _PressureWrite;
+
+RWTexture2D<float4> _FluidMap;
+int2 _FluidMapTS;
+
+float2 _ImpulseUV;
+float2 _ImpulseDirection;
+float _ImpulseSpeed;
+float _ImpulseDensity;
+float _ImpulseRadius;
+
+float _VelocityDissipation;
+float _DensityDissipation;
+float _DeltaTime;
+
+int _Resolution;
+
+float _PoissonAlpha;
+float _PoissonRBeta;
+
+float _GridScale;
+
+#define SPEED_THRESHOLD 0.0001
+
+float2 grid_clamp(float2 v)
+{
+	return sign(v) * step(SPEED_THRESHOLD, abs(v));
+}
+
+int2 clamp_coord(float2 coord)
+{
+	return clamp(coord, int2(0, 0), _Resolution);
+}
+
+int get_buffer_index(int2 id)
+{
+	return id.x + id.y * _Resolution;
+}
+
+int get_buffer_index_clamped(int2 id)
+{
+	int2 pos = clamp_coord(id);
+	return get_buffer_index(pos);
+}
+
+float2 GetAdvectedPos(float2 id)
+{
+	float2 u1 = _VelocityRead[get_buffer_index_clamped(id)].xy * _DeltaTime * _GridScale;
+	return id - u1;
+}
+
+float SampleDensityBilerp(float2 pos)
+{
+	float2 blend = frac(pos);
+	int2 floorPos = floor(pos);
+
+	float xL = _DensityRead[get_buffer_index_clamped(floorPos)];
+	float xR = _DensityRead[get_buffer_index_clamped(floorPos + int2(1, 0))];
+	float xB = _DensityRead[get_buffer_index_clamped(floorPos + int2(0, 1))];
+	float xT = _DensityRead[get_buffer_index_clamped(floorPos + int2(1, 1))];
+    
+	float col_x = lerp(xL, xR, blend.x);
+	float col_y = lerp(xB, xT, blend.x);
+	return lerp(col_x, col_y, blend.y);
+}
+
+float2 SampleVelocityBilerp(float2 pos)
+{
+	int2 floorPos = pos;
+	float2 blend = pos - floorPos;
+
+	float2 xL = _VelocityRead[get_buffer_index_clamped(floorPos)];
+	float2 xR = _VelocityRead[get_buffer_index_clamped(floorPos + int2(1, 0))];
+	float2 xB = _VelocityRead[get_buffer_index_clamped(floorPos + int2(0, 1))];
+	float2 xT = _VelocityRead[get_buffer_index_clamped(floorPos + int2(1, 1))];
+    
+	float2 col_x = lerp(xL, xR, blend.x);
+	float2 col_y = lerp(xB, xT, blend.x);
+	return lerp(col_x, col_y, blend.y);
+}
+
+#pragma kernel AdvectionDensity
+[numthreads(8,8,1)]
+void AdvectionDensity (uint2 id : SV_DispatchThreadID)
+{
+	//float2 deltaPos = id - _VelocityRead[get_buffer_index(id)] * _DeltaTime * _GridScale;
+	float2 deltaPos = GetAdvectedPos(id);
+	float advectedDensity = SampleDensityBilerp(deltaPos) * _DensityDissipation;
+
+	_DensityWrite[get_buffer_index(id)] = advectedDensity;
+}
+
+#pragma kernel AdvectionVelocity
+[numthreads(8,8,1)]
+void AdvectionVelocity (uint2 id : SV_DispatchThreadID)
+{
+	float2 deltaPos = GetAdvectedPos(id);
+	float2 advectedVelocity = SampleVelocityBilerp(deltaPos) * _VelocityDissipation;
+
+    _VelocityWrite[get_buffer_index(id)] = advectedVelocity;
+}
+
+#pragma kernel AddImpulse
+[numthreads(8,8,1)]
+void AddImpulse (uint2 id : SV_DispatchThreadID)
+{
+	int bufferId = get_buffer_index(id);
+	float currentDensity = _DensityRead[bufferId];
+	float2 currentVelocity = _VelocityRead[bufferId];
+
+	float2 dir = id - _ImpulseUV;
+	float sqDist = dot(dir, dir);
+	float gridRadius = _ImpulseRadius * _GridScale;
+	float gridRad2 = gridRadius * gridRadius;
+	if (sqDist <= gridRad2)
+	{
+		float gradient = exp(-sqDist/gridRad2) * _DeltaTime;
+		currentDensity += gradient * _ImpulseDensity;
+		currentVelocity += gradient * _ImpulseDirection * _ImpulseSpeed;
+	}
+	_DensityWrite[bufferId] = currentDensity;
+	_VelocityWrite[bufferId] = currentVelocity;
+}
+
+#pragma kernel DiffuseDensity
+[numthreads(8,8,1)]
+void DiffuseDensity (uint2 id : SV_DispatchThreadID)
+{
+	float xL = _DensityRead[get_buffer_index_clamped(id - int2(1, 0))];
+	float xR = _DensityRead[get_buffer_index_clamped(id + int2(1, 0))];
+	float xB = _DensityRead[get_buffer_index_clamped(id - int2(0, 1))];
+	float xT = _DensityRead[get_buffer_index_clamped(id + int2(0, 1))];
+
+	int bufferId = get_buffer_index(id);
+	float bC = _DensityRead[bufferId];
+	_DensityWrite[bufferId] = (xL + xR + xB + xT + _PoissonAlpha * bC) * _PoissonRBeta;
+}
+
+#pragma kernel DiffuseVelocity
+[numthreads(8,8,1)]
+void DiffuseVelocity (uint2 id : SV_DispatchThreadID)
+{
+	// left, right, bottom, and top x samples
+	float2 xL = _VelocityRead[get_buffer_index_clamped(id - int2(1, 0))];
+	float2 xR = _VelocityRead[get_buffer_index_clamped(id + int2(1, 0))];
+	float2 xB = _VelocityRead[get_buffer_index_clamped(id - int2(0, 1))];
+	float2 xT = _VelocityRead[get_buffer_index_clamped(id + int2(0, 1))];
+	
+	int bufferId = get_buffer_index(id);
+	float2 bC = _VelocityRead[bufferId];
+	_VelocityWrite[bufferId] = (xL + xR + xB + xT + _PoissonAlpha * bC) * _PoissonRBeta;
+}
+
+#pragma kernel Projection
+[numthreads(8,8,1)]
+void Projection (uint2 id : SV_DispatchThreadID)
+{
+	// left, right, bottom, and top x samples
+	float2 xL = _VelocityRead[get_buffer_index_clamped(id - half2(1, 0))];
+	float2 xR = _VelocityRead[get_buffer_index_clamped(id + half2(1, 0))];
+	float2 xB = _VelocityRead[get_buffer_index_clamped(id - half2(0, 1))];
+	float2 xT = _VelocityRead[get_buffer_index_clamped(id + half2(0, 1))];
+	_Divergence[get_buffer_index(id)] = 0.5 * ((xR.x - xL.x) + (xT.y - xB.y));
+}
+
+#pragma kernel SolvePressure
+[numthreads(8,8,1)]
+void SolvePressure (uint2 id : SV_DispatchThreadID)
+{
+	// left, right, bottom, and top x samples
+	float xL = _PressureRead[get_buffer_index_clamped(id - half2(1, 0))];
+	float xR = _PressureRead[get_buffer_index_clamped(id + half2(1, 0))];
+	float xB = _PressureRead[get_buffer_index_clamped(id - half2(0, 1))];
+	float xT = _PressureRead[get_buffer_index_clamped(id + half2(0, 1))];
+
+	int bufferId = get_buffer_index(id);
+	float bC = _Divergence[bufferId];
+	_PressureWrite[bufferId] = (xL + xR + xB + xT + _PoissonAlpha * bC) * _PoissonRBeta;
+}
+
+#pragma kernel GradientSubtraction
+[numthreads(8,8,1)]
+void GradientSubtraction (uint2 id : SV_DispatchThreadID)
+{
+	float xL = _PressureRead[get_buffer_index_clamped(id - half2(1, 0))];
+	float xR = _PressureRead[get_buffer_index_clamped(id + half2(1, 0))];
+	float xB = _PressureRead[get_buffer_index_clamped(id - half2(0, 1))];
+	float xT = _PressureRead[get_buffer_index_clamped(id + half2(0, 1))];
+
+	int bufferId = get_buffer_index(id);
+	_VelocityWrite[bufferId] = _VelocityRead[bufferId] - (float2(xR - xL, xT - xB) * (0.5f * _GridScale));
+}
+
+
+#pragma kernel BlitToFluidMap
+[numthreads(8,8,1)]
+void BlitToFluidMap (uint2 id : SV_DispatchThreadID)
+{
+	float2 texUV = id / (float)_FluidMapTS.x;
+	int2 texPos = texUV * _FluidMapTS.y;
+	int bufferId = get_buffer_index(texPos);
+	
+	float2 velocity = _VelocityRead[bufferId];
+	float density = _DensityRead[bufferId];
+	float3 fluidMap = float3(velocity.xy, density);
+	
+	_FluidMap[id] = float4(fluidMap.rg, fluidMap.b, 1.0);
+}
+
+#pragma kernel BlitDensity
+[numthreads(8,8,1)]
+void BlitDensity (uint2 id : SV_DispatchThreadID)
+{
+	float2 texUV = id / (float)_FluidMapTS.x;
+	int2 texPos = texUV * _FluidMapTS.y;
+	int bufferId = get_buffer_index(texPos);
+	
+	_FluidMap[id] = float4(_DensityRead[bufferId].xxx, 1.0);
+}
+
+Texture2D<float3> _InputTexture;
+int2 _InputTextureSize;
+
+#pragma kernel BlitVelocity
+[numthreads(8,8,1)]
+void BlitVelocity (uint2 id : SV_DispatchThreadID)
+{
+	float2 texUV = id / (float)_FluidMapTS.x;
+	int2 texPos = texUV * _FluidMapTS.y;
+	int bufferId = get_buffer_index(texPos);
+
+	float2 velocity = _VelocityRead[bufferId];
+	
+	_FluidMap[id] = float4(velocity.rg * 0.5 + 0.5, 0.0, lerp(0.1, 1.0, length(velocity.rg)));
+}
+
+#pragma kernel AddImpulseToVelocity
+[numthreads(8,8,1)]
+void AddImpulseToVelocity (uint2 id : SV_DispatchThreadID)
+{
+	float2 velocityUV = id / (float)_Resolution;
+	int2 inputPos = velocityUV * _InputTextureSize;
+	_VelocityWrite[get_buffer_index(id)] = _InputTexture[inputPos] * 2.0f;
+}
+
+
+
+
+

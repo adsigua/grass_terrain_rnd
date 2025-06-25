@@ -1,0 +1,63 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+struct Transform
+{
+    float3 worldPosition;
+    float2 facing;
+    float width;
+    float height;
+};
+
+AppendStructuredBuffer<Transform> _GrassTransforms;
+
+
+float3 _TileCenter;
+float _TileSize;
+float _TileDensity;
+float _TrueGrassCount;
+float _GrassOffsetStrength;
+float4 _GrassScalingRange;
+
+//random value generator 2d to 2d
+//https://www.shadertoy.com/view/XlGcRh
+uint2 pcg2d(uint2 v)
+{
+    v = v * 1664525u + 1013904223u;
+
+    v.x += v.y * 1664525u;
+    v.y += v.x * 1664525u;
+
+    v = v ^ (v>>16u);
+
+    v.x += v.y * 1664525u;
+    v.y += v.x * 1664525u;
+
+    v = v ^ (v>>16u);
+
+    return v;
+}
+
+[numthreads(16,16,1)]
+void CSMain (uint2 id : SV_DispatchThreadID, uint2 groupID : SV_GroupThreadID)
+{
+    Transform newTransform;
+    
+    float2 pos = id.xy / (_TileDensity - 1);
+    float2 randomPos = (pcg2d(id) % 100) / 100.0;
+    float2 idPos = (pos.xy * 2 - 1) * (_TileSize * 0.5) + (randomPos * _GrassOffsetStrength);
+    newTransform.worldPosition = float3(idPos.x, 0, idPos.y);
+
+    float2 randomScaling = (pcg2d(id*57) % 100) / 100.0;
+    newTransform.width = lerp(_GrassScalingRange.x, _GrassScalingRange.y, randomScaling.x);
+    newTransform.height = lerp(_GrassScalingRange.z, _GrassScalingRange.w, randomScaling.y);
+
+    float2 randomRot = (pcg2d(id*73) % 100) / 100.0;
+    newTransform.facing = normalize(randomRot * 2.0 - 1.0);
+    
+    if (id.x >= _TileDensity || id.y >= _TileDensity)
+        return;
+    _GrassTransforms.Append(newTransform);
+}

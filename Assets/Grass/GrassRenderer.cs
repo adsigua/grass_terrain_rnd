@@ -14,11 +14,14 @@ public class GrassRenderer : MonoBehaviour
     
     [SerializeField,Range(-1,1)] private float _grassTilt = 0.1f;
     [SerializeField,Range(-1,1)] private float _grassBend = 0.1f;
+    [SerializeField,Range(0,1)] private float _grassBendPos = 0.5f;
+    [SerializeField,Range(0,1)] private float _grassWindDissipation = 0.99f;
 
     
     private GraphicsBuffer _meshTriangles;
     private GraphicsBuffer _meshVertices;
     private GraphicsBuffer _meshUVs;
+    private ComputeBuffer _grassWindValues;
     private ComputeBuffer _grassObjectTransforms;
     private ComputeBuffer _readBackArgsBuffer;
 
@@ -35,10 +38,12 @@ public class GrassRenderer : MonoBehaviour
         _meshUVs = new GraphicsBuffer(GraphicsBuffer.Target.Structured, _mesh.uv.Length, 2 * sizeof(float));
         _meshUVs.SetData(_mesh.uv);
         _grassTrueSize = _grassDensity * _grassDensity;
-        _grassObjectTransforms = new ComputeBuffer(_grassTrueSize, sizeof(float) * (3+2+1+1), ComputeBufferType.Append);
+        _grassWindValues = new ComputeBuffer(_grassTrueSize, sizeof(float) * 2);
+        _grassObjectTransforms = new ComputeBuffer(_grassTrueSize, sizeof(float) * (3+2+2+1+1), ComputeBufferType.Append);
         _readBackArgsBuffer = new ComputeBuffer(1, sizeof(int), ComputeBufferType.Raw);
        
         _grassPositionComputeShader.SetBuffer(0, "_GrassTransforms", _grassObjectTransforms);
+        _grassPositionComputeShader.SetBuffer(0, "_GrassWindValues", _grassWindValues);
     }
     
     void OnDestroy()
@@ -49,6 +54,8 @@ public class GrassRenderer : MonoBehaviour
         _meshVertices = null;
         _meshUVs?.Dispose();
         _meshUVs = null;
+        _grassWindValues?.Dispose();
+        _grassWindValues = null;
         _grassObjectTransforms?.Dispose();
         _grassObjectTransforms = null;
         _readBackArgsBuffer?.Dispose();
@@ -77,6 +84,15 @@ public class GrassRenderer : MonoBehaviour
         _grassPositionComputeShader.SetFloat("_TrueGrassCount", _grassTrueSize);
         _grassPositionComputeShader.SetFloat("_GrassOffsetStrength", _grassOffsetStrength);
         _grassPositionComputeShader.SetVector("_GrassScalingRange", new Vector4(_grassWidthScaleRange.x, _grassWidthScaleRange.y, _grassHeightScaleRange.x, _grassHeightScaleRange.y));
+
+        var windTex = Shader.GetGlobalTexture("_AmbientWindMap");
+        Vector2 windTexSize = new Vector2(windTex.width, windTex.height);
+        _grassPositionComputeShader.SetTexture(0, "_AmbientWindMap", windTex);
+        _grassPositionComputeShader.SetVector( "_AmbientWindMapSize", windTexSize);
+        
+        _grassPositionComputeShader.SetVector( "_AmbientWindCenter", Shader.GetGlobalVector("_AmbientWindCenter"));
+        _grassPositionComputeShader.SetFloat( "_AmbientWindSize", Shader.GetGlobalFloat("_AmbientWindSize"));
+        _grassPositionComputeShader.SetFloat( "_WindDissipation", _grassWindDissipation);
         
         _grassObjectTransforms.SetCounterValue(0);
         int threadSize = Mathf.CeilToInt(_grassDensity / 16.0f);
@@ -103,6 +119,7 @@ public class GrassRenderer : MonoBehaviour
         rp.matProps.SetBuffer("_VertexUVs", _meshUVs);
         rp.matProps.SetFloat("_Tilt", _grassTilt);
         rp.matProps.SetFloat("_Bend", _grassBend);
+        rp.matProps.SetFloat("_BendPos", _grassBendPos);
         //rp.matProps.SetInt("_BaseVertexIndex", (int)_mesh.GetBaseVertex(0));
         //rp.matProps.SetMatrix("_ObjectToWorld", transform.localToWorldMatrix);
         //rp.matProps.SetFloat("_NumInstances", _grassCount);

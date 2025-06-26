@@ -227,13 +227,15 @@ MonoBehaviour:
   _material: {fileID: 2100000, guid: 252c57deaf1fc564ba6c95b8d85541ed, type: 2}
   _mesh: {fileID: 2496604747785188947, guid: 181fafa2616a3ac4a90e21479d31f90c, type: 3}
   _grassPositionComputeShader: {fileID: 7200000, guid: 0a11fc9da22f3564fa1530c679af02d7, type: 3}
-  _tileSize: 20
-  _grassDensity: 32
+  _tileSize: 40
+  _grassDensity: 128
   _grassOffsetStrength: 0.3
   _grassWidthScaleRange: {x: 0.07, y: 0.09}
-  _grassHeightScaleRange: {x: 2.2, y: 2.4}
-  _grassTilt: 0.1
-  _grassBend: 0.1
+  _grassHeightScaleRange: {x: 2.4, y: 2.8}
+  _grassTilt: 0.341
+  _grassBend: 0.338
+  _grassBendPos: 0.749
+  _grassWindDissipation: 0.945
   _grassCount: 1024
 --- !u!4 &274754100
 Transform:
@@ -831,7 +833,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &1252357188
 Transform:
   m_ObjectHideFlags: 0

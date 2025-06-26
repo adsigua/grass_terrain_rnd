@@ -7,11 +7,18 @@ struct Transform
 {
     float3 worldPosition;
     float2 facing;
+    float2 windVector;
     float width;
     float height;
 };
 
 AppendStructuredBuffer<Transform> _GrassTransforms;
+RWStructuredBuffer<float2> _GrassWindValues;
+Texture2D<float4> _AmbientWindMap;
+float2 _AmbientWindMapSize;
+float3 _AmbientWindCenter;
+float _AmbientWindSize;
+float _WindDissipation;
 
 
 float3 _TileCenter;
@@ -40,19 +47,43 @@ uint2 pcg2d(uint2 v)
     return v;
 }
 
+float4 SampleAmbientWindBilepr(float3 grassPos)
+{
+    float2 texUV = ((grassPos - _AmbientWindCenter).xz / _AmbientWindSize) + 0.5;
+    float2 pos = texUV * _AmbientWindMapSize; 
+    int2 floorPos = pos;
+    float2 blend = pos - floorPos;
+
+    float4 xL = _AmbientWindMap[(floorPos)];
+    float4 xR = _AmbientWindMap[(floorPos + int2(1, 0))];
+    float4 xB = _AmbientWindMap[(floorPos + int2(0, 1))];
+    float4 xT = _AmbientWindMap[(floorPos + int2(1, 1))];
+    
+    float4 col_x = lerp(xL, xR, blend.x);
+    float4 col_y = lerp(xB, xT, blend.x);
+    return lerp(col_x, col_y, blend.y);
+}
+
 [numthreads(16,16,1)]
 void CSMain (uint2 id : SV_DispatchThreadID, uint2 groupID : SV_GroupThreadID)
 {
     Transform newTransform;
+
     
     float2 pos = id.xy / (_TileDensity - 1);
     float2 randomPos = (pcg2d(id) % 100) / 100.0;
     float2 idPos = (pos.xy * 2 - 1) * (_TileSize * 0.5) + (randomPos * _GrassOffsetStrength);
     newTransform.worldPosition = float3(idPos.x, 0, idPos.y);
 
+    float windValue = SampleAmbientWindBilepr(newTransform.worldPosition).a;
+    int bufferIndex = id.x + id.y * _TileDensity;
+    _GrassWindValues[bufferIndex] *= _WindDissipation;
+    _GrassWindValues[bufferIndex] += windValue * 0.1;
+    
     float2 randomScaling = (pcg2d(id*57) % 100) / 100.0;
     newTransform.width = lerp(_GrassScalingRange.x, _GrassScalingRange.y, randomScaling.x);
     newTransform.height = lerp(_GrassScalingRange.z, _GrassScalingRange.w, randomScaling.y);
+    newTransform.windVector = float2(1, 1) * _GrassWindValues[bufferIndex];
 
     float2 randomRot = (pcg2d(id*73) % 100) / 100.0;
     newTransform.facing = normalize(randomRot * 2.0 - 1.0);

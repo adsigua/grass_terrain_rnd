@@ -1,4 +1,6 @@
 using UnityEngine;
+using NaughtyAttributes;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Serialization;
 
 public class GrassRenderer : MonoBehaviour
@@ -12,10 +14,15 @@ public class GrassRenderer : MonoBehaviour
     [SerializeField] private Vector2 _grassWidthScaleRange = new Vector2(1f, 1f);
     [SerializeField] private Vector2 _grassHeightScaleRange = new Vector2(1f, 1f);
     
-    [SerializeField,Range(-1,1)] private float _grassTilt = 0.1f;
-    [SerializeField,Range(-1,1)] private float _grassBend = 0.1f;
-    [SerializeField,Range(0,1)] private float _grassBendPos = 0.5f;
-    [SerializeField,Range(0,1)] private float _grassWindDissipation = 0.99f;
+    [SerializeField] private int _randomSeed = 0;
+    [SerializeField, Range(-1,1)] private float _grassTilt = 0.1f;
+    [SerializeField, Range(-1,1)] private float _grassBend = 0.1f;
+    [SerializeField, Range(0,1)] private float _grassBendPos = 0.5f;
+    [SerializeField, Range(0,1)] private float _grassWindDissipation = 0.99f;
+    
+    [FormerlySerializedAs("_grassDirection")] [SerializeField, ReadOnly] private Vector2 _grassDefaultDirection;
+    [FormerlySerializedAs("_grassDefaultDirection")] [SerializeField, Range(0,1)] private float _grassDefaultAngle = 0.0f;
+    [SerializeField, Range(0,1)] private float _grassDirectionRandomness = 0.0f;
 
     
     private GraphicsBuffer _meshTriangles;
@@ -25,7 +32,8 @@ public class GrassRenderer : MonoBehaviour
     private ComputeBuffer _grassObjectTransforms;
     private ComputeBuffer _readBackArgsBuffer;
 
-    [SerializeField] private int _grassCount;
+    [SerializeField] private RenderTexture _windValuesTex;
+    [SerializeField, ReadOnly] private int _grassCount;
     private int _grassTrueSize;
     
     private void Start()
@@ -39,11 +47,17 @@ public class GrassRenderer : MonoBehaviour
         _meshUVs.SetData(_mesh.uv);
         _grassTrueSize = _grassDensity * _grassDensity;
         _grassWindValues = new ComputeBuffer(_grassTrueSize, sizeof(float) * 2);
-        _grassObjectTransforms = new ComputeBuffer(_grassTrueSize, sizeof(float) * (3+2+2+1+1), ComputeBufferType.Append);
+        _grassObjectTransforms = new ComputeBuffer(_grassTrueSize, sizeof(float) * (3+2+1+1+1), ComputeBufferType.Append);
         _readBackArgsBuffer = new ComputeBuffer(1, sizeof(int), ComputeBufferType.Raw);
        
+        _windValuesTex = new RenderTexture(_grassDensity, _grassDensity, GraphicsFormat.R32G32_SFloat, 0);
+        _windValuesTex.enableRandomWrite = true;
+        
         _grassPositionComputeShader.SetBuffer(0, "_GrassTransforms", _grassObjectTransforms);
         _grassPositionComputeShader.SetBuffer(0, "_GrassWindValues", _grassWindValues);
+        
+        _grassPositionComputeShader.SetBuffer(1, "_GrassWindValues", _grassWindValues);
+        _grassPositionComputeShader.SetTexture(1, "_WindValuesTexture", _windValuesTex);
     }
     
     void OnDestroy()
@@ -60,6 +74,7 @@ public class GrassRenderer : MonoBehaviour
         _grassObjectTransforms = null;
         _readBackArgsBuffer?.Dispose();
         _readBackArgsBuffer = null;
+        _windValuesTex?.Release();
     }
 
     private void OnDrawGizmosSelected()
@@ -78,13 +93,21 @@ public class GrassRenderer : MonoBehaviour
 
     private void InitGrass()
     {
+        _grassPositionComputeShader.SetFloat("_DeltaTime", Time.deltaTime);
+        _grassPositionComputeShader.SetFloat("_RandomSeed", _randomSeed);
         _grassPositionComputeShader.SetVector("_TileCenter", transform.position);
         _grassPositionComputeShader.SetFloat("_TileSize", _tileSize);
         _grassPositionComputeShader.SetFloat("_TileDensity", _grassDensity);
         _grassPositionComputeShader.SetFloat("_TrueGrassCount", _grassTrueSize);
         _grassPositionComputeShader.SetFloat("_GrassOffsetStrength", _grassOffsetStrength);
         _grassPositionComputeShader.SetVector("_GrassScalingRange", new Vector4(_grassWidthScaleRange.x, _grassWidthScaleRange.y, _grassHeightScaleRange.x, _grassHeightScaleRange.y));
+        
+        float defaultDirAngle = _grassDefaultAngle * Mathf.PI * 2.0f;
+        _grassDefaultDirection = (new Vector2(Mathf.Cos(defaultDirAngle), Mathf.Sin(defaultDirAngle))).normalized;
+        _grassPositionComputeShader.SetVector("_GrassDefaultFacing", _grassDefaultDirection);
+        _grassPositionComputeShader.SetFloat("_GrassFacingRandomness", _grassDirectionRandomness);
 
+        
         var windTex = Shader.GetGlobalTexture("_AmbientWindMap");
         Vector2 windTexSize = new Vector2(windTex.width, windTex.height);
         _grassPositionComputeShader.SetTexture(0, "_AmbientWindMap", windTex);
@@ -92,12 +115,15 @@ public class GrassRenderer : MonoBehaviour
         
         _grassPositionComputeShader.SetVector( "_AmbientWindCenter", Shader.GetGlobalVector("_AmbientWindCenter"));
         _grassPositionComputeShader.SetFloat( "_AmbientWindSize", Shader.GetGlobalFloat("_AmbientWindSize"));
+        _grassPositionComputeShader.SetVector( "_AmbientWindDirection", Shader.GetGlobalVector("_AmbientWindDirection"));
+        _grassPositionComputeShader.SetFloat( "_AmbientWindStrength", Shader.GetGlobalFloat("_AmbientWindStrength"));
         _grassPositionComputeShader.SetFloat( "_WindDissipation", _grassWindDissipation);
         
         _grassObjectTransforms.SetCounterValue(0);
         int threadSize = Mathf.CeilToInt(_grassDensity / 16.0f);
         _grassPositionComputeShader.Dispatch(0, threadSize, threadSize, 1);
-
+        _grassPositionComputeShader.Dispatch(1, threadSize, threadSize, 1);
+        
         SetGrassCount();
     }
     

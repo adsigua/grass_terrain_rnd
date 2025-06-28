@@ -1,10 +1,10 @@
 using System;
-using System.Collections.Generic;
 using NaughtyAttributes;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using NaughtyAttributes;
 using Unity.Collections;
+using UnityEngine.Serialization;
 
 public class WindControl : MonoBehaviour
 {
@@ -15,6 +15,8 @@ public class WindControl : MonoBehaviour
     [SerializeField] private float _ambientWindSpeed = 10.0f;
     [SerializeField] private float _ambientWindStrength = 1.0f;
     [SerializeField] private float _ambientWindNoiseFrequency = 10.0f;
+    [SerializeField, NaughtyAttributes.ReadOnly] private Vector2 _ambientWindDirection;
+    [FormerlySerializedAs("_ambientWindDirection")] [SerializeField,Range(0,1)] private float _ambientWindAngle = 0.25f;
     
     [Header("Wind Fluid Sim")]
     [SerializeField] private Transform _impulseTransform;
@@ -82,7 +84,7 @@ public class WindControl : MonoBehaviour
         _fluidSimComputeShader.SetInt(_Resolution, _simResolution);
         _fluidSimComputeShader.SetFloat(_GridScale, _gridScale);
         
-        _ambientWindTexture = new RenderTexture(2048, 2048, GraphicsFormat.R16G16B16A16_UNorm, 0);
+        _ambientWindTexture = new RenderTexture(2048, 2048, GraphicsFormat.R32_SFloat, 0);
         
         InitKernels();
         InitBuffers();
@@ -93,6 +95,9 @@ public class WindControl : MonoBehaviour
         Shader.SetGlobalVector("_AmbientWindCenter", transform.position);
         Shader.SetGlobalFloat("_AmbientWindSize", _ambientWindSize);
         Shader.SetGlobalFloat("_AmbientWindStrength", _ambientWindStrength);
+        float ambientWindDirAngle = _ambientWindAngle * Mathf.PI * 2.0f;
+        _ambientWindDirection = (new Vector2(Mathf.Cos(ambientWindDirAngle), Mathf.Sin(ambientWindDirAngle))).normalized;
+        Shader.SetGlobalVector("_AmbientWindDirection", _ambientWindDirection);
         
         BlitAmbientWind();
         DoWindSimulation();

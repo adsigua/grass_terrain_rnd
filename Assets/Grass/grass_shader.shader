@@ -9,7 +9,7 @@ Shader "Unlit/grass_shader"
     }
     SubShader
     {
-        Tags { "RenderType"="Opaque" "RenderPipeline" = "UniversalRenderPipeline"}
+        Tags { "RenderType"="Opaque" "RenderPipeline" = "UniversalRenderPipeline" }
         LOD 100
 
         cull off
@@ -45,13 +45,13 @@ Shader "Unlit/grass_shader"
             struct Transform
             {
                 float3 position;
-                float2 facing;
+                float3x3 rotation;
                 float windFactor;
                 float width;
                 float height;
             };
 
-            sampler2D _AmbientWindMap;
+            uniform sampler2D _AmbientWindMap;
             float4 _AmbientWindMap_ST;
             float4 _AmbientWindMap_TexelSize;
 
@@ -237,7 +237,7 @@ Shader "Unlit/grass_shader"
                 float height = _GrassTransforms[instanceID].height;
                 float halfWidth = _GrassTransforms[instanceID].width;
 
-                float2 grassXZFacing = _GrassTransforms[instanceID].facing;
+                //float2 grassXZFacing = _GrassTransforms[instanceID].facing;
                 float3 grassWorldPos = _GrassTransforms[instanceID].position;
                 float windFactor = _GrassTransforms[instanceID].windFactor;
                 //windFactor = 0;
@@ -246,18 +246,18 @@ Shader "Unlit/grass_shader"
                 //half flutterValue = getFlutterValue(o.uv.y, _GrassTransforms[instanceID].position.xz) * _AmbientWindStrength;
                 //flutterValue = 0;
 
-                float tiltValue = _Tilt + windFactor * 0.05 * 0;
-
                 float2 midPoint = float2(0, _BendPos);
                 float tipValue = 0;
                 computeMidAndTipValues(o.uv,_GrassTransforms[instanceID].position.x,  windFactor, midPoint, tipValue);
                 
                 float3 bezierPos = computeBezierPos(o.uv, height, halfWidth, midPoint, tipValue);
 
-                float3x3 tiltRotMat = getTiltRotation(float2(1.0 - abs(tiltValue), tiltValue));
-                float3x3 facingRotMat = getFacingRotation(grassXZFacing);
-                float3x3 totalRot = mul(facingRotMat, tiltRotMat);
-                
+                //float tiltValue = _Tilt + windFactor * 0.05 * 0;
+                //float3x3 tiltRotMat = getTiltRotation(float2(1.0 - abs(tiltValue), tiltValue));
+                //float3x3 facingRotMat = getFacingRotation(grassXZFacing);
+                //float3x3 totalRot = mul(_GrassTransforms[instanceID].rotation, tiltRotMat);
+
+                float3x3 totalRot = _GrassTransforms[instanceID].rotation;
                 computeNormals(o.uv, midPoint, tipValue, totalRot, o.normalWS, o.tangentWS);
                 
                 float3 wpos = mul(totalRot, bezierPos) + grassWorldPos;
@@ -350,8 +350,7 @@ Shader "Unlit/grass_shader"
 
                 inputData.bakedGI = SampleSHPixel(frag.vertexSH, inputData.normalWS);
                 inputData.shadowMask = half4(1,1,1,1);
-                //inputData.bakedGI = SampleSHPixel(frag.vertexSH, inputData.normalWS);
-                //inputData.bakedGI = float3((1.0).xxx);
+
                 return inputData;
             }
             
@@ -367,22 +366,38 @@ Shader "Unlit/grass_shader"
                 //float thickness = 1.0 - surfaceData.occlusion;
                 float3 subSurfColor = _SubSurfColor * subSurfMask * surfaceData.occlusion;
 
-                //surfaceData.albedo += subSurfColor;
+                surfaceData.albedo += subSurfColor;
 
                 float lightNormalDot = dot(light.direction, inputData.normalWS);
                 float shadowFade = light.shadowAttenuation * lerp(1.0, 1, lightNormalDot + 1.0);
 
                 inputData.bakedGI += shadowFade;
-                
-                float4 pbrColor = UniversalFragmentPBR(inputData, surfaceData);
 
+                float windVal = tex2D(_AmbientWindMap, frag.wpos.xz / _AmbientWindSize + 0.5).x;
                 
-            
+                float4 color0 = float4(0,0,.8, 0);
+                float4 color1 = float4(0,.8,0, 0.3333);   
+                float4 color2 = float4(.8,0,0, 0.7);
+                
+                float3 color = color0;
+                
+                float colorPos = saturate((windVal - color0.w) / (color1.w - color0.w)) * step(1, 2);
+                color = lerp(color, color1, colorPos);
+
+                colorPos = saturate((windVal - color1.w) / (color2.w - color1.w)) * step(2, 2);
+                color = lerp(color, color2, colorPos);
+
+                //float windVal = frag.windValue.x;
+                //float3 blueToGreen = lerp(float3(0,0,1), float3(0,1,0), saturate(windVal * 3));
+                //float3 greenToRed = lerp(blueToGreen, float3(1,0,0), saturate((windVal - 0.66) * 3.0));
+                
+                //surfaceData.albedo = lerp(surfaceData.albedo, surfaceData.albedo * color, 0.6);
+                //surfaceData.albedo *= color ;
+                float4 pbrColor = UniversalFragmentPBR(inputData, surfaceData);
                 
                 return pbrColor;
                 //return float4(subSurfColor, 1.0);
                 //return float4(lerp(inputData.normalWS, isFront.xxx, step(0.5,frag.uv.x)), 1.0);
-                return float4(shadowFade.xxx, 1.0);
 
                 
                 //return float4(lightDir, 1.0);

@@ -213,7 +213,7 @@ void BlitToFluidMap (uint2 id : SV_DispatchThreadID)
 	float density = _DensityRead[bufferId];
 	float3 fluidMap = float3(velocity.xy, density);
 	
-	_FluidMap[id] = float4(fluidMap.rg, fluidMap.b, 1.0);
+	_FluidMap[id] = float4(fluidMap, 1.0);
 }
 
 #pragma kernel BlitDensity

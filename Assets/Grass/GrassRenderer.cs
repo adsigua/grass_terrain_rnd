@@ -47,7 +47,7 @@ public class GrassRenderer : MonoBehaviour
         _meshUVs.SetData(_mesh.uv);
         _grassTrueSize = _grassDensity * _grassDensity;
         _grassWindValues = new ComputeBuffer(_grassTrueSize, sizeof(float) * 2);
-        _grassObjectTransforms = new ComputeBuffer(_grassTrueSize, sizeof(float) * (3+2+1+1+1), ComputeBufferType.Append);
+        _grassObjectTransforms = new ComputeBuffer(_grassTrueSize, sizeof(float) * (3+(3*3)+1+1+1), ComputeBufferType.Append);
         _readBackArgsBuffer = new ComputeBuffer(1, sizeof(int), ComputeBufferType.Raw);
        
         _windValuesTex = new RenderTexture(_grassDensity, _grassDensity, GraphicsFormat.R32G32_SFloat, 0);
@@ -109,14 +109,25 @@ public class GrassRenderer : MonoBehaviour
 
         
         var windTex = Shader.GetGlobalTexture("_AmbientWindMap");
+        var fluidTex = Shader.GetGlobalTexture("_FluidMap");
+
         Vector2 windTexSize = new Vector2(windTex.width, windTex.height);
+        Vector2 fluidTexSize = new Vector2(fluidTex.width, fluidTex.height);
         _grassPositionComputeShader.SetTexture(0, "_AmbientWindMap", windTex);
+        _grassPositionComputeShader.SetTexture(0, "_FluidMap", fluidTex);
         _grassPositionComputeShader.SetVector( "_AmbientWindMapSize", windTexSize);
+        _grassPositionComputeShader.SetVector( "_FluidMapSize", fluidTexSize);
         
+        _grassPositionComputeShader.SetFloat( "_GrassTilt", _grassTilt);
+        _grassPositionComputeShader.SetFloat( "_TerrainBufferWidth", Shader.GetGlobalFloat("_TerrainBufferWidth"));
+        _grassPositionComputeShader.SetFloat( "_TerrainSize", Shader.GetGlobalFloat("_TerrainSize"));
+        _grassPositionComputeShader.SetVector( "_TerrainCenter", Shader.GetGlobalVector("_TerrainCenter"));
+
         _grassPositionComputeShader.SetVector( "_AmbientWindCenter", Shader.GetGlobalVector("_AmbientWindCenter"));
         _grassPositionComputeShader.SetFloat( "_AmbientWindSize", Shader.GetGlobalFloat("_AmbientWindSize"));
         _grassPositionComputeShader.SetVector( "_AmbientWindDirection", Shader.GetGlobalVector("_AmbientWindDirection"));
         _grassPositionComputeShader.SetFloat( "_AmbientWindStrength", Shader.GetGlobalFloat("_AmbientWindStrength"));
+        _grassPositionComputeShader.SetFloat( "_FluidMapWindStrength", Shader.GetGlobalFloat("_FluidMapWindStrength"));
         _grassPositionComputeShader.SetFloat( "_WindDissipation", _grassWindDissipation);
         
         _grassObjectTransforms.SetCounterValue(0);

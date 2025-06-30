@@ -1,0 +1,84 @@
+#pragma kernel ComputeTerrainData
+#pragma kernel BlitTerrainToTexture
+
+RWStructuredBuffer<float4> _TerrainBuffer;
+
+RWTexture2D<float4> _TerrainTexture;
+
+//float3 _TerrainCenter;
+//float _TerrainSize;
+int _BufferWidth;
+float _TerrainHeight;
+float _NormalComputeStepSize;
+float _PerlinScale;
+
+float _TerrainFloor;
+
+float2 hash22(float2 p)
+{
+    p = float2( dot(p,float2(127.1,311.7)),
+              dot(p,float2(269.5,183.3)));
+                
+    return -1.0 + 2.0 * frac(sin(p)*43758.5453123);
+}
+
+
+float perlin_noise(float2 p)
+{
+    float2 pi = floor(p);
+    float2 pf = p - pi;
+                
+    float2 w = pf * pf * (3.0 - 2.0 * pf);
+    float i = w.x, j = w.y;
+
+    float2 a = hash22(pi + float2(0.0, 0.0)), b = pf - float2(0.0, 0.0),
+           c = hash22(pi + float2(1.0, 0.0)), d = pf - float2(1.0, 0.0),
+           e = hash22(pi + float2(0.0, 1.0)), f = pf - float2(0.0, 1.0),
+           g = hash22(pi + float2(1.0, 1.0)), h = pf - float2(1.0, 1.0);
+
+    float perlinValue = lerp(
+        lerp(dot(a, b), dot(c, d), w.x), 
+        lerp(dot(e, f), dot(g, h), w.x),
+               w.y);
+    return max(0, ((perlinValue * 2.0) + (0.5 - _TerrainFloor)));
+}
+
+float4 getPerlin(float2 p)
+{
+    float dt = _NormalComputeStepSize;
+    float xC = perlin_noise(p) * _TerrainHeight;
+    float xL = perlin_noise(p + (float2(-1.0, 0.0) * dt));
+    float xR = perlin_noise(p + (float2(1.0, 0.0) * dt));
+    float xD = perlin_noise(p + (float2(0.0, -1.0) * dt));
+    float xU = perlin_noise(p + (float2(0.0, 1.0) * dt));
+
+    float3 va = normalize(float3(1, (xR - xL) * _TerrainHeight, 0));
+    float3 vb = normalize(float3(0, (xU - xD) * _TerrainHeight, 1));
+    float3 normalCom = normalize(cross(vb,va));
+    return float4(normalCom, xC);
+}
+
+[numthreads(16,16,1)]
+void ComputeTerrainData (uint2 id : SV_DispatchThreadID)
+{
+    int bufferIndex = (id.x + id.y * _BufferWidth);
+    _TerrainBuffer[bufferIndex] = getPerlin(id.xy * _PerlinScale);
+}
+
+[numthreads(16,16,1)]
+void BlitTerrainToTexture (uint2 id : SV_DispatchThreadID)
+{
+    int bufferIndex = (id.x + id.y * _BufferWidth);
+    _TerrainTexture[id] = _TerrainBuffer[bufferIndex];
+}
+
+// #pragma kernel BlitWindValuesToTex
+//
+// RWTexture2D<float2> _WindValuesTexture;
+//
+// [numthreads(16,16,1)]
+// void BlitWindValuesToTex (uint2 id : SV_DispatchThreadID, uint2 groupID : SV_GroupThreadID)
+// {
+//     int bufferIndex = id.x + id.y * _TileDensity;
+//     _WindValuesTexture[id] = _GrassWindValues[bufferIndex];
+// }

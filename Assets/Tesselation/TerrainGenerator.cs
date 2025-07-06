@@ -2,11 +2,12 @@ using NaughtyAttributes;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Serialization;
+using Utils;
 
 public class TerrainGenerator : MonoBehaviour
 {
    [SerializeField] private ComputeShader _terrainGeneratorCompute;
-   [SerializeField] private ComputeBuffer _terrainBuffer;
+   [SerializeField] private ComputeBuffer _terrainDataBuffer;
    [SerializeField] private bool _blitToTexture = false;
    [SerializeField, ShowIf("_blitToTexture")] private RenderTexture _terrainTexture;
    [SerializeField] private int _terrainBufferWidth = 512;
@@ -22,11 +23,11 @@ public class TerrainGenerator : MonoBehaviour
 
    private void Start()
    {
-      _terrainBuffer = new ComputeBuffer(_terrainBufferWidth * _terrainBufferWidth, sizeof(float) * 4);
+      _terrainDataBuffer = new ComputeBuffer(_terrainBufferWidth * _terrainBufferWidth, sizeof(float) * (1 + 3 + 3));
       _terrainTexture = new RenderTexture(_terrainBufferWidth, _terrainBufferWidth, 0, GraphicsFormat.R16G16B16A16_UNorm);
       _terrainTexture.enableRandomWrite = true;
 
-      _terrainGeneratorCompute.SetBuffer(0, "_TerrainBuffer", _terrainBuffer);
+      _terrainGeneratorCompute.SetBuffer(0, ShaderConstants.TerrainDataBuffer, _terrainDataBuffer);
 
       _hasInit = true;
       
@@ -39,26 +40,26 @@ public class TerrainGenerator : MonoBehaviour
          return;
       //_terrainGeneratorCompute.SetVector( "_TerrainCenter", Vector3.zero);
       //_terrainGeneratorCompute.SetFloat( "_TerrainSize", _terrainSize);
-      _terrainGeneratorCompute.SetFloat( "_BufferWidth", _terrainBufferWidth);
-      _terrainGeneratorCompute.SetFloat( "_TerrainHeight", _terrainHeight);
-      _terrainGeneratorCompute.SetFloat( "_NormalComputeStepSize", _normalStepSize);
-      _terrainGeneratorCompute.SetFloat( "_PerlinScale", _noiseScale / 100.0f );
-      _terrainGeneratorCompute.SetFloat( "_TerrainFloor", _terrainFloor);
+      _terrainGeneratorCompute.SetFloat( ShaderConstants.TerrainBufferWidth, _terrainBufferWidth);
+      _terrainGeneratorCompute.SetFloat( ShaderConstants.TerrainHeight, _terrainHeight);
+      _terrainGeneratorCompute.SetFloat( ShaderConstants.TerrainNormalComputeStepSize, _normalStepSize);
+      _terrainGeneratorCompute.SetFloat( ShaderConstants.TerrainPerlinScale, _noiseScale / 100.0f );
+      _terrainGeneratorCompute.SetFloat( ShaderConstants.TerrainFloor, _terrainFloor);
       
       int threadSize = Mathf.CeilToInt(_terrainBufferWidth / 16.0f);
       _terrainGeneratorCompute.Dispatch(0, threadSize, threadSize, 1);
       
       if (_blitToTexture)
       {
-         _terrainGeneratorCompute.SetBuffer(1, "_TerrainBuffer", _terrainBuffer);
-         _terrainGeneratorCompute.SetTexture(1, "_TerrainTexture", _terrainTexture);
+         _terrainGeneratorCompute.SetBuffer(1, ShaderConstants.TerrainDataBuffer, _terrainDataBuffer);
+         _terrainGeneratorCompute.SetTexture(1, ShaderConstants.TerrainTexture, _terrainTexture);
          _terrainGeneratorCompute.Dispatch(1, threadSize, threadSize, 1);
       }
       
-      Shader.SetGlobalBuffer("_TerrainBuffer", _terrainBuffer);
-      Shader.SetGlobalFloat("_TerrainBufferWidth", _terrainBufferWidth);
-      Shader.SetGlobalFloat("_TerrainSize", _terrainSize);
-      Shader.SetGlobalVector("_TerrainCenter", transform.position);
+      Shader.SetGlobalBuffer(ShaderConstants.TerrainDataBuffer, _terrainDataBuffer);
+      Shader.SetGlobalFloat(ShaderConstants.TerrainBufferWidth, _terrainBufferWidth);
+      Shader.SetGlobalFloat(ShaderConstants.TerrainSize, _terrainSize);
+      Shader.SetGlobalVector(ShaderConstants.TerrainCenter, transform.position);
    }
 
    private void OnValidate()
@@ -72,7 +73,7 @@ public class TerrainGenerator : MonoBehaviour
  
    private void OnDestroy()
    {
-      _terrainBuffer?.Release();
+      _terrainDataBuffer?.Release();
       _terrainTexture?.Release();
    }
    

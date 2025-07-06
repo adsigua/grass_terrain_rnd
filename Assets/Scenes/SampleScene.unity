@@ -151,9 +151,9 @@ MonoBehaviour:
   _ambientWindTexture: {fileID: 0}
   _ambientWindMaterial: {fileID: 2100000, guid: 7bee2f4f23438304380fc5f840b1b3f2, type: 2}
   _ambientWindSize: 256
-  _ambientWindSpeed: 5
-  _ambientWindStrength: 8
-  _ambientWindNoiseFrequency: 2
+  _ambientWindSpeed: 1
+  _ambientWindStrength: {x: 0, y: 19.820896}
+  _ambientWindNoiseFrequency: 1
   _ambientWindDirection: {x: 0, y: 0}
   _ambientWindAngle: 0.5
   _fluidMapWindStrength: 0
@@ -214,7 +214,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!114 &274754099
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -230,19 +230,25 @@ MonoBehaviour:
   _material: {fileID: 2100000, guid: 252c57deaf1fc564ba6c95b8d85541ed, type: 2}
   _mesh: {fileID: 2496604747785188947, guid: 181fafa2616a3ac4a90e21479d31f90c, type: 3}
   _grassPositionComputeShader: {fileID: 7200000, guid: 0a11fc9da22f3564fa1530c679af02d7, type: 3}
-  _tileSize: 256
-  _grassDensity: 1024
+  _tileSize: 100
+  _grassDensity: 256
   _grassOffsetStrength: 0.3
   _grassWidthScaleRange: {x: 0.07, y: 0.09}
   _grassHeightScaleRange: {x: 2.5, y: 3}
   _randomSeed: 0
-  _grassTilt: 0.15
-  _grassBend: 0.35
-  _grassBendPos: 0.8
-  _grassWindDissipation: 0.85
+  _grassTilt: 0.19
+  _grassBend: 0.8
+  _grassBendPos: 0.495
+  _grassWindDissipation: 0.919
+  _grassWindEffect: 0.058
+  _grassFlutter: 0.345
+  _grassStiffness: 0.72
+  _valueHolderA: 0.1
+  _valueHolderB: 0
+  _valueHolderC: -0.4
   _grassDefaultDirection: {x: 0, y: 0}
-  _grassDefaultAngle: 0.5
-  _grassDirectionRandomness: 0.078
+  _grassDefaultAngle: 0.461
+  _grassDirectionRandomness: 0.035
   _windValuesTex: {fileID: 0}
   _grassCount: 1024
 --- !u!4 &274754100
@@ -456,6 +462,14 @@ PrefabInstance:
     - target: {fileID: 6592499067125525666, guid: 45e28980879252c4a9233944c7a713da, type: 3}
       propertyPath: _terrainSize
       value: 256
+      objectReference: {fileID: 0}
+    - target: {fileID: 6592499067125525666, guid: 45e28980879252c4a9233944c7a713da, type: 3}
+      propertyPath: _terrainHeight
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7653255668284780613, guid: 45e28980879252c4a9233944c7a713da, type: 3}
+      propertyPath: m_IsActive
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 8827083157121270739, guid: 45e28980879252c4a9233944c7a713da, type: 3}
       propertyPath: m_LocalScale.x

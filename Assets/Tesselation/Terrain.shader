@@ -35,6 +35,7 @@ Shader "Unlit/Terrain"
             
             //#include "UnityCG.cginc"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #include "terrain_utils.hlsl"
 
             struct vertData
             {
@@ -77,7 +78,6 @@ Shader "Unlit/Terrain"
             sampler2D _HeightMap;
             float4 _HeightMap_ST;
             float4 _HeightMap_TexelSize;
-
 
             TessControlPoint vert (vertData IN)
             {
@@ -187,7 +187,7 @@ Shader "Unlit/Terrain"
                 patch[1].fieldName * barycentricCoordinates.y + \
                 patch[2].fieldName * barycentricCoordinates.z
 
-            uniform StructuredBuffer<float4> _TerrainBuffer;
+            uniform StructuredBuffer<TerrainData> _TerrainDataBuffer;
             uniform float _TerrainBufferWidth;
             uniform float _TerrainSize;
             uniform float3 _TerrainCenter;
@@ -196,24 +196,52 @@ Shader "Unlit/Terrain"
             {
                 return id.x + id.y * _TerrainBufferWidth;
             }
-            
-            float4 SampleTerrainBufferBilerp(float2 posXZ)
+
+            TerrainData SampleTerrainBufferBilerp(float2 posXZ)
             {
                 float2 uv = ((posXZ - _TerrainCenter.xz) / _TerrainSize) + 0.5;
                 float2 texelPos = uv * _TerrainBufferWidth;
                 int2 floorPos = texelPos;
                 float2 blend = texelPos - floorPos;
 
-                float4 xL = _TerrainBuffer[getPosBufferIndex(floorPos)];
-                float4 xR = _TerrainBuffer[getPosBufferIndex(floorPos + int2(1.0, 0.0))];
-                float4 xB = _TerrainBuffer[getPosBufferIndex(floorPos + int2(0.0, 1.0))];
-                float4 xT = _TerrainBuffer[getPosBufferIndex(floorPos + int2(1.0, 1.0))];
+                TerrainData xL = _TerrainDataBuffer[getPosBufferIndex(floorPos)];
+                TerrainData xR = _TerrainDataBuffer[getPosBufferIndex(floorPos + int2(1.0, 0.0))];
+                TerrainData xB = _TerrainDataBuffer[getPosBufferIndex(floorPos + int2(0.0, 1.0))];
+                TerrainData xT = _TerrainDataBuffer[getPosBufferIndex(floorPos + int2(1.0, 1.0))];
                 
-                float4 col_x = lerp(xL, xR, blend.x);
-                float4 col_y = lerp(xB, xT, blend.x);
-                //return xR;
-                return lerp(col_x, col_y, blend.y);
+                float3 normalX = lerp(xL.normal, xR.normal, blend.x);
+                float3 normalY = lerp(xB.normal, xT.normal, blend.x);
+
+                float3 tangentX = lerp(xL.tangent, xR.tangent, blend.x);
+                float3 tangentY = lerp(xB.tangent, xT.tangent, blend.x);
+
+                float heightX = lerp(xL.height, xR.height, blend.x);
+                float heightY = lerp(xB.height, xT.height, blend.x);
+
+                TerrainData td;
+                td.height = lerp(heightX, heightY, blend.y);
+                td.normal = lerp(normalX, normalY, blend.y);
+                td.tangent = lerp(tangentX, tangentY, blend.y);
+                return td;
             }
+            
+            // float4 SampleTerrainBufferBilerp(float2 posXZ)
+            // {
+            //     float2 uv = ((posXZ - _TerrainCenter.xz) / _TerrainSize) + 0.5;
+            //     float2 texelPos = uv * _TerrainBufferWidth;
+            //     int2 floorPos = texelPos;
+            //     float2 blend = texelPos - floorPos;
+            //
+            //     float4 xL = _TerrainBuffer[getPosBufferIndex(floorPos)];
+            //     float4 xR = _TerrainBuffer[getPosBufferIndex(floorPos + int2(1.0, 0.0))];
+            //     float4 xB = _TerrainBuffer[getPosBufferIndex(floorPos + int2(0.0, 1.0))];
+            //     float4 xT = _TerrainBuffer[getPosBufferIndex(floorPos + int2(1.0, 1.0))];
+            //     
+            //     float4 col_x = lerp(xL, xR, blend.x);
+            //     float4 col_y = lerp(xB, xT, blend.x);
+            //     //return xR;
+            //     return lerp(col_x, col_y, blend.y);
+            // }
             
             [domain("tri")]
             fragData domain(TessFactors factors, OutputPatch<TessControlPoint,3> patch, float3 barycentricCoordinates : SV_DomainLocation)
@@ -226,12 +254,13 @@ Shader "Unlit/Terrain"
 
                 float3 positionWS = BARYCENTRIC_INTERP(positionWS);
 
-                float4 displacement = SampleTerrainBufferBilerp(positionWS.xz);
-		        positionWS.y += displacement.w;
+                //float4 displacement = SampleTerrainBufferBilerp(positionWS.xz);
+                TerrainData td = SampleTerrainBufferBilerp(positionWS.xz);
+		        positionWS.y += td.height;
                 
                 frag.positionWS =  positionWS;
                 frag.positionCS = mul(UNITY_MATRIX_VP, float4(positionWS, 1.0));
-                frag.normalWS = displacement.xyz;
+                frag.normalWS = td.normal;
 
                 return frag;
             }

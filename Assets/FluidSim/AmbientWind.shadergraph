@@ -1028,7 +1028,7 @@
     "m_Type": "UnityEditor.ShaderGraph.Vector1MaterialSlot",
     "m_ObjectId": "09285471ad2f411e92d1ea7186d1f9fb",
     "m_Id": 0,
-    "m_DisplayName": "WindSpeed",
+    "m_DisplayName": "_AmbientWindSpeed",
     "m_SlotType": 1,
     "m_Hidden": false,
     "m_ShaderOutputName": "Out",
@@ -2018,12 +2018,12 @@
     "m_Guid": {
         "m_GuidSerialized": "19f3d5d4-9ee2-43bf-b757-e5b476425cca"
     },
-    "m_Name": "WindSpeed",
+    "m_Name": "_AmbientWindSpeed",
     "m_DefaultRefNameVersion": 1,
-    "m_RefNameGeneratedByDisplayName": "WindSpeed",
-    "m_DefaultReferenceName": "_WindSpeed",
+    "m_RefNameGeneratedByDisplayName": "_AmbientWindSpeed",
+    "m_DefaultReferenceName": "_AmbientWindSpeed",
     "m_OverrideReferenceName": "",
-    "m_GeneratePropertyBlock": true,
+    "m_GeneratePropertyBlock": false,
     "m_UseCustomSlotLabel": false,
     "m_CustomSlotLabel": "",
     "m_DismissedVersion": 0,
@@ -2095,12 +2095,12 @@
     "m_Guid": {
         "m_GuidSerialized": "8f26a94a-123d-4571-a4a1-a32e778fdaf1"
     },
-    "m_Name": "Frequency",
+    "m_Name": "_AmbientWindFrequency",
     "m_DefaultRefNameVersion": 1,
-    "m_RefNameGeneratedByDisplayName": "Frequency",
-    "m_DefaultReferenceName": "_Frequency",
+    "m_RefNameGeneratedByDisplayName": "_AmbientWindFrequency",
+    "m_DefaultReferenceName": "_AmbientWindFrequency",
     "m_OverrideReferenceName": "",
-    "m_GeneratePropertyBlock": true,
+    "m_GeneratePropertyBlock": false,
     "m_UseCustomSlotLabel": false,
     "m_CustomSlotLabel": "",
     "m_DismissedVersion": 0,
@@ -3670,13 +3670,13 @@
     "m_Name": "",
     "m_ChildObjectList": [
         {
+            "m_Id": "a8afa71c31004596a08ba1190916372e"
+        },
+        {
             "m_Id": "445e8d72e8514db4bd682644b3f00f6c"
         },
         {
             "m_Id": "49471710d6c543039da57b6b6a4cd5b3"
-        },
-        {
-            "m_Id": "a8afa71c31004596a08ba1190916372e"
         },
         {
             "m_Id": "c42794b157144dcc8f3b608bee385d61"
@@ -3695,7 +3695,7 @@
     "m_Type": "UnityEditor.ShaderGraph.Vector1MaterialSlot",
     "m_ObjectId": "99adc044b93943c7867bb55af3d389a6",
     "m_Id": 0,
-    "m_DisplayName": "Frequency",
+    "m_DisplayName": "_AmbientWindFrequency",
     "m_SlotType": 1,
     "m_Hidden": false,
     "m_ShaderOutputName": "Out",

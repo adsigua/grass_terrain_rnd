@@ -115,7 +115,7 @@ Material:
     - _DstBlendAlpha: 0
     - _EnvironmentReflections: 1
     - _Float: 0.27
-    - _Frequency: 2
+    - _Frequency: 1
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0
@@ -132,7 +132,7 @@ Material:
     - _SrcBlendAlpha: 1
     - _Strength: 1
     - _Surface: 0
-    - _WindSpeed: 5
+    - _WindSpeed: 2
     - _WorkflowMode: 1
     - _ZWrite: 1
     - _stepTest: 0.55

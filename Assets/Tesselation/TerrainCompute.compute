@@ -1,17 +1,17 @@
 #pragma kernel ComputeTerrainData
 #pragma kernel BlitTerrainToTexture
 
+#include "terrain_utils.hlsl"
+
 RWStructuredBuffer<float4> _TerrainBuffer;
+RWStructuredBuffer<TerrainData> _TerrainDataBuffer;
 
 RWTexture2D<float4> _TerrainTexture;
 
-//float3 _TerrainCenter;
-//float _TerrainSize;
-int _BufferWidth;
+int _TerrainBufferWidth;
 float _TerrainHeight;
-float _NormalComputeStepSize;
-float _PerlinScale;
-
+float _TerrainNormalComputeStepSize;
+float _TerrainPerlinScale;
 float _TerrainFloor;
 
 float2 hash22(float2 p)
@@ -43,9 +43,9 @@ float perlin_noise(float2 p)
     return max(0, ((perlinValue * 2.0) + (0.5 - _TerrainFloor)));
 }
 
-float4 getPerlin(float2 p)
+TerrainData getPerlin(float2 p)
 {
-    float dt = _NormalComputeStepSize;
+    float dt = _TerrainNormalComputeStepSize;
     float xC = perlin_noise(p) * _TerrainHeight;
     float xL = perlin_noise(p + (float2(-1.0, 0.0) * dt));
     float xR = perlin_noise(p + (float2(1.0, 0.0) * dt));
@@ -55,22 +55,28 @@ float4 getPerlin(float2 p)
     float3 va = normalize(float3(1, (xR - xL) * _TerrainHeight, 0));
     float3 vb = normalize(float3(0, (xU - xD) * _TerrainHeight, 1));
     float3 normalCom = normalize(cross(vb,va));
-    return float4(normalCom, xC);
+    TerrainData td;
+    td.height = xC;
+    td.normal = normalCom;
+    td.tangent = va;
+    return td;
 }
 
 [numthreads(16,16,1)]
 void ComputeTerrainData (uint2 id : SV_DispatchThreadID)
 {
-    int bufferIndex = (id.x + id.y * _BufferWidth);
-    _TerrainBuffer[bufferIndex] = getPerlin(id.xy * _PerlinScale);
+    int bufferIndex = (id.x + id.y * _TerrainBufferWidth);
+    _TerrainDataBuffer[bufferIndex] = getPerlin(id.xy * _TerrainPerlinScale);
 }
 
 [numthreads(16,16,1)]
 void BlitTerrainToTexture (uint2 id : SV_DispatchThreadID)
 {
-    int bufferIndex = (id.x + id.y * _BufferWidth);
-    _TerrainTexture[id] = _TerrainBuffer[bufferIndex];
+    int bufferIndex = (id.x + id.y * _TerrainBufferWidth);
+    TerrainData td = _TerrainDataBuffer[bufferIndex];
+    _TerrainTexture[id] = float4(td.normal, td.height);
 }
+
 
 // #pragma kernel BlitWindValuesToTex
 //

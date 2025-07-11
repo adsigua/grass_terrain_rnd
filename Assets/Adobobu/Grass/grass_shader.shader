@@ -13,7 +13,7 @@ Shader "Unlit/grass_shader"
     {
         Tags { "RenderType"="Opaque" "RenderPipeline" = "UniversalRenderPipeline" }
         LOD 100
-
+        //ZWrite Off
         cull off
         
         Pass
@@ -40,7 +40,7 @@ Shader "Unlit/grass_shader"
                 float3 tangentWS : TEXCOORD3;
                 float3 grassPos : TEXCOORD4;
                 DECLARE_LIGHTMAP_OR_SH(lightmapUV, vertexSH, 5);
-                float3 windValue : TEXCOORD6;
+                float3 windFactor : TEXCOORD6;
             };
 
             uniform sampler2D _AmbientWindMap;
@@ -53,37 +53,58 @@ Shader "Unlit/grass_shader"
             float _ValueHolderA;
             float _ValueHolderB;
             float _ValueHolderC;
+            float _GrassChunkCount;
 
-            StructuredBuffer<float3> _VertexObjectSpacePositions;
             StructuredBuffer<float2> _VertexUVs;
             StructuredBuffer<Transform> _GrassTransforms;
-
+ 
             float getFlutterValue(float t, float offset)
             {
                 float curveVal = -4.0 * (t - 0.5) * (t - 0.5) + 1.0;
                 return offset * (1.0 - curveVal) + curveVal;
             }
             
-            void computeNormals(float2 uv, float2 midPoint, float2 tipValue, float3x3 totalRot, out float3 normalWS, out float3 tangentWS)
+            float4 getViewOrthoOffset(float2 uv, float3 grassPosWS, float3 tipDir, float3 posWS, float3 normalWS, out float dotResult)
             {
-                float2 bezTangent = bezierTangent(midPoint, tipValue, uv.y);
-                
-                tangentWS = normalize(float3(0, bezTangent.yx));
-                normalWS = normalize(float3(0, bezTangent.x, -bezTangent.y));
-                
-                tangentWS = mul(totalRot, tangentWS);
-                normalWS = mul(totalRot, normalWS);
-            }
+                // float3 camPosRight = _WorldSpaceCameraPos;
+                // camPosRight.y = grassPosWS.y;
+                //
+                // float3 viewDir = normalize(UNITY_MATRIX_IT_MV[2].xyz);
+                // viewDir = mul((float3x3)unity_CameraToWorld, float3(0,0,1));
+                // float3 viewDirRight = -viewDir;
+                // viewDirRight.y = 0;
+                // viewDirRight = normalize(viewDirRight);
+                float3 viewDir = normalize(_WorldSpaceCameraPos - grassPosWS);
+                float3 normalRight = cross(normalWS, float3(0,1,0));
 
-            float3 getViewOrthoOffset(float uv, float3 posWS, float3 normalWS)
-            {
-                float2 viewDir = normalize(_WorldSpaceCameraPos.xz - posWS.xz);
-                float facingViewDot = abs(dot(normalWS.xz, viewDir));
+                float rightDot = dot(normalize(normalRight), normalize(viewDir));
+                float forwardDot = dot(normalize(normalWS), normalize(viewDir));
+                
+                float upDot = dot(tipDir, viewDir);
+
+                float sideSmoothStep = smoothstep(0.95, 1.0, abs(rightDot));
+                float sideFrontSmoothStep = smoothstep(0.2, 0.0, abs(forwardDot));
+                float sideThickness = 0.04 * max(sideFrontSmoothStep,sideSmoothStep) * sign(rightDot) * sign(forwardDot);
+                
+                float topSmoothStep = smoothstep(0.99, 1.0, abs(upDot));
+                float topThickness = 0.2 * smoothstep(0.95, 1.0, abs(upDot)) * sign(upDot);
                
-                float sideThickness = 0.02;
-                float3 sidePos = posWS + lerp(-normalWS, normalWS, uv.x) * sideThickness;
-
-                return lerp(sidePos, posWS, easeOut(facingViewDot, 4));
+                float3 sideNormalOffset = lerp(normalWS, -normalWS, uv.x) * sideThickness;
+                float3 frontNormalOffset = lerp(0, -normalWS, uv.y) * topThickness;
+                float3 finalPos = posWS + sideNormalOffset + frontNormalOffset;
+                //float3 finalPos = posWS + sideNormalOffset + frontNormalOffset;
+                //finalPos = posWS;
+                
+                float4 offsetCS = mul(UNITY_MATRIX_VP, float4(finalPos, 1.0));
+                //float4 grassCS = mul(UNITY_MATRIX_VP, float4(normalWS, 1.0));
+                dotResult = topSmoothStep;
+                
+                //offsetCS.xy = offsetCS.xy + grassCS.xy * sideThickness * 0.1;
+                //float3 sidePos = posWS + lerp(-normalWS, normalWS, uv.x) * sideThickness * sideValue;
+                //return lerp(sidePos, posWS, easeIn(facingViewDot, 4));
+                //return lerp(sidePos, posWS, sideValue);
+                
+                return offsetCS;
             }
             
             fragData vert (uint vertexID: SV_VertexID, uint instanceID : SV_InstanceID)
@@ -94,33 +115,65 @@ Shader "Unlit/grass_shader"
 
                 float height = transform.height;
                 float halfWidth = transform.width;
-
                 float3 grassWorldPos = transform.position;
-                float windFactor = transform.windFactor;
-                //half3 randomVals = (pcg3d(grassWorldPos * 619) % 100) / 100.0;
-                //
-                // float stiffness = lerp(0, 1.0 - o.uv.y, _ValueHolderB);
-                // float2 tipPoint = lerp(transform.bezierEndPoint, float2(0,1), stiffness);
-                // float2 midPoint = lerp(transform.bezierMidPoint, float2(-_GrassBend*0.2, _GrassBendPos), stiffness);
+
+                // float height = 3;
+                // float halfWidth = 0.2;
+                // float3 grassWorldPos =  transform.position;
+                
                 float2 tipPoint = transform.bezierEndPoint;
                 float2 midPoint = transform.bezierMidPoint;
                 
-                //computeMidAndTipValues(o.uv,_GrassTransforms[instanceID].position.x,  windFactor, midPoint, tipPoint);
-                
-                float3 bezierPos = computeBezierPos(o.uv, height, halfWidth, midPoint, tipPoint);
-                
                 float3x3 totalRot = transform.rotation;
-                computeNormals(o.uv, midPoint, tipPoint, totalRot, o.normalWS, o.tangentWS);
+                float bezierLengthOffset = 3.0 / (length(tipPoint) * 2.0 + length(midPoint) + length(tipPoint - midPoint));
+
+                // float3 averageNormal = mul(totalRot, normalize(float3(0, tipPoint.x, -tipPoint.y)));
+                // float3 tipDir = mul(totalRot, normalize(float3(0, tipPoint.y, tipPoint.x) * height * bezierLengthOffset));
+                // float3 grassCenter = grassWorldPos + tipDir * (height * 0.5);
+                //
+                // float3 viewDir = normalize(_WorldSpaceCameraPos - grassCenter);
+                //
+                // float3 xaxis = normalize(cross(float3(0,1,0), viewDir));
+                // float3 yaxis = normalize(cross(viewDir, xaxis));
+                // float3x3 viewRot;
+                // viewRot[0].x = xaxis.x;
+                // viewRot[0].y = yaxis.x;
+                // viewRot[0].z = viewDir.x;
+                //
+                // viewRot[1].x = xaxis.y;
+                // viewRot[1].y = yaxis.y;
+                // viewRot[1].z = viewDir.y;
+                //
+                // viewRot[2].x = xaxis.z;
+                // viewRot[2].y = yaxis.z;
+                // viewRot[2].z = viewDir.z;
+                // float3x3 offsetRot = mul(viewRot, totalRot);
+                //
+                // float forwardDot = dot(normalize(averageNormal), viewDir);
+                // float sideFrontSmoothStep = smoothstep(0.05, 0.0, abs(forwardDot));
+
+                //totalRot = lerp(totalRot, offsetRot, sideFrontSmoothStep * 0.6);
+
+                float3 bezierPos = computeBezierPos(o.uv, height, bezierLengthOffset, halfWidth, midPoint, tipPoint);
+
+                o.normalWS = float3(0,0,-1);
+                o.tangentWS = float3(0,1,0);
+                computeNormals(o.uv, height, bezierLengthOffset, midPoint, tipPoint, totalRot, o.normalWS, o.tangentWS);
                 
                 float3 wpos = mul(totalRot, bezierPos) + grassWorldPos;
                 
-                wpos = getViewOrthoOffset(o.uv, wpos, o.normalWS);
-                
                 o.wpos = wpos;
+                
                 o.pos = mul(UNITY_MATRIX_VP, float4(wpos, 1.0));
+                //o.pos = getViewOrthoOffset(o.uv, grassCenter, tipDir, wpos, averageNormal, rightDot);
                 
                 o.grassPos = grassWorldPos;
-                o.windValue = float3(windFactor.xxx);
+
+                float4 csPos = mul(UNITY_MATRIX_VP, float4(wpos, 1.0));
+                float depth = csPos.z / csPos.w;
+                
+                o.windFactor = transform.windFactor;
+                //o.windFactor = depth.xxx;
 
                 OUTPUT_SH(o.normalWS, o.vertexSH);
 
@@ -243,16 +296,24 @@ Shader "Unlit/grass_shader"
                 // float3 greenToRed = lerp(blueToGreen, float3(1,0,0), saturate((windVal - 0.66) * 3.0));
                 
                 //surfaceData.albedo = lerp(surfaceData.albedo, surfaceData.albedo * color, 0.6);
-                //surfaceData.albedo = frag.windValue;
+                //surfaceData.albedo = frag.windFactor;
                 //surfaceData.albedo *= color ;
                 float4 pbrColor = UniversalFragmentPBR(inputData, surfaceData);
                 
-                return pbrColor;
-                
+                //return pbrColor;
                 //return float4(subSurfColor, 1.0);
                 //return float4(lerp(inputData.normalWS, isFront.xxx, step(0.5,frag.uv.x)), 1.0);
                 //return float4(lightDir, 1.0);
-                return float4(frag.grassPos, 1.0);
+
+                float depthStep = step(_ValueHolderB, frag.windFactor.xxx);
+
+                float4 xPos = mul(UNITY_MATRIX_VP, float4(frag.wpos, 1.0));
+
+                float xScreenPos = xPos.x / xPos.w;
+                float windFactorValue = lerp(frag.windFactor.x, frag.windFactor.y, step(0.0, xScreenPos));
+                
+                return float4(windFactorValue.xxx, 1.0);
+                return float4(frag.windFactor.yyy, 1.0);
 
             }
             ENDHLSL

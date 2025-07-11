@@ -1,0 +1,152 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+#include "UnityCG.cginc"
+#include "grass_utils.hlsl"
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+
+uniform StructuredBuffer<TerrainData> _TerrainDataBuffer;
+
+float4x4 _CameraViewMatrix;
+float4x4 _CameraViewProjectionMatrix;
+float4 _CameraZBufferParams;
+float4 _CameraProjectionParams;
+StructuredBuffer<Plane> _CameraPlanes;
+StructuredBuffer<float3> _BoundsOffets;
+AppendStructuredBuffer<float4> _GrassChunks;
+
+float3 _TileCenter;
+float _TileSize;
+float _GrassChunkSize;
+
+float _ChunksPerTile;
+
+float _GrassOcclusionOffset;
+float3 _GrassChunkLocalBoundsCenter;
+float3 _GrassChunkLocalBoundsExtents;
+
+float _TerrainBufferWidth;
+float3 _TerrainCenter;
+float _TerrainSize;
+
+Texture2D<float> _DepthTexture;
+SamplerState linearClampSampler;
+
+float _ValueHolderB;
+
+//Texture2D<float> _CameraDepthTexture;
+
+float getSignedDistanceToPlane(float3 pos, Plane plane)
+{
+    return dot(plane.normal, pos) - plane.distance;
+}
+
+bool isOnOrForwardPlane(Bounds bounds, Plane plane)
+{
+    // Compute the projection interval radius of b onto L(t) = b.c + t * p.n
+    float r = bounds.extents.x * abs(plane.normal.x) +
+           bounds.extents.y * abs(plane.normal.y) + bounds.extents.z * abs(plane.normal.z);
+
+    return -r <= getSignedDistanceToPlane(bounds.center, plane);
+}
+
+bool isOnFrustum(Bounds bounds)
+{
+    //to faillure to avoid to call all functions.
+    return (isOnOrForwardPlane(bounds ,_CameraPlanes[_TOP]   ) &&
+            isOnOrForwardPlane(bounds ,_CameraPlanes[_BOTTOM]) &&
+            isOnOrForwardPlane(bounds ,_CameraPlanes[_LEFT]  ) &&
+            isOnOrForwardPlane(bounds ,_CameraPlanes[_RIGHT] ) &&
+            isOnOrForwardPlane(bounds ,_CameraPlanes[_NEAR]  ) &&
+            isOnOrForwardPlane(bounds ,_CameraPlanes[_FAR]   ));
+};
+
+float2 GetChunkTerrainMinMaxHeight(float2 posXZ)
+{
+    float2 uv = ((posXZ - _TerrainCenter.xz) / _TerrainSize) + 0.5;
+    float2 texelPos = uv * _TerrainBufferWidth;
+    int2 floorPos = texelPos;
+
+    float xL = _TerrainDataBuffer[getPosBufferIndex(floorPos, _TerrainBufferWidth)].height;
+    float xR = _TerrainDataBuffer[getPosBufferIndex(floorPos + int2(1.0, 0.0), _TerrainBufferWidth)].height;
+    float xB = _TerrainDataBuffer[getPosBufferIndex(floorPos + int2(0.0, 1.0), _TerrainBufferWidth)].height;
+    float xT = _TerrainDataBuffer[getPosBufferIndex(floorPos + int2(1.0, 1.0), _TerrainBufferWidth)].height;
+    
+    float minH = min(min(xL, xR),min(xB, xT));
+    float maxH = max(max(xL, xR),max(xB, xT));
+    return float2(minH, maxH);
+}
+
+bool isDepthOccluded(Bounds bounds)
+{
+    return false;
+};
+
+float linearizeDepth(float d, float zNear, float zFar)
+{
+    
+    return zNear * zFar / (zFar + d * (zNear - zFar));
+}
+
+[numthreads(16,16,1)]
+void CSMain (uint2 id : SV_DispatchThreadID)
+{
+    if (id.x >= _ChunksPerTile || id.y >= _ChunksPerTile)
+        return;
+
+    half2 pos = (_TileCenter + (id.xy * _GrassChunkSize)) + (_GrassChunkSize * 0.5) - (_TileSize * 0.5);
+    float2 minMaxHeight = GetChunkTerrainMinMaxHeight(pos);
+    float3 halfHeightDiff = float3(0, (minMaxHeight.y - minMaxHeight.x), 0);
+    
+    Bounds bounds;
+    bounds.center = float3(pos.x, 0, pos.y) + _GrassChunkLocalBoundsCenter + halfHeightDiff * 0.5;
+    bounds.extents = _GrassChunkLocalBoundsExtents + halfHeightDiff;
+    
+    bool frustumCulled = !isOnFrustum(bounds);
+    
+    if (frustumCulled)
+        return;
+    
+    bool isOccluded = true;
+    // for (int i=0; i<8; i++)
+    // {
+    //     float3 cornerPos = bounds.center + _BoundsOffets[i] * (bounds.extents + _GrassOcclusionOffset);
+    //     float4 csPos = mul(_CameraVPMatrix, float4(cornerPos, 1.0));
+    //     float depth = csPos.z / csPos.w;
+    //     float2 cornerUV = (csPos.xy / csPos.w) * 0.5 + 0.5;
+    //     float sampleDepth = _CopyDepthTexture.SampleLevel(linearClampSampler, cornerUV, 0);
+    //
+    //     if (sampleDepth <= depth)
+    //     {
+    //         isOccluded = false;
+    //         break;
+    //     }
+    // }
+    
+    //float4 centerVS = mul(_CameraViewMatrix, float4(bounds.center, 1.0));
+    float4 centerCS = mul(_CameraViewProjectionMatrix, float4(bounds.center, 1.0));
+    
+    float2 centerUV = (centerCS.xy / centerCS.w) * 0.5 + 0.5;
+    float sampleDepth = _DepthTexture.SampleLevel(linearClampSampler, centerUV, 0);
+    float centerDepth = centerCS.z/centerCS.w;
+    
+    float linearSampleDepth =  1.0 / (_CameraZBufferParams.x * sampleDepth + _CameraZBufferParams.y);
+    float linearCenterDepth =  1.0 / (_CameraZBufferParams.x * centerDepth + _CameraZBufferParams.y);
+
+    //float linearCenterDepth = -centerVS.z / (_CameraProjectionParams.z - _CameraProjectionParams.y);
+    
+    if (centerDepth < sampleDepth - _ValueHolderB)
+    {
+        isOccluded = false;
+    }
+    // if (isOccluded)
+    //     return;
+    
+    //SAMPLE_DEPTH_TEXTURE_LOD(_CameraDepthTexture, float4(centerUV,0,0));
+    float linearCenter = 1.0 / (_CameraZBufferParams.x * centerDepth + _CameraZBufferParams.y);
+    
+    _GrassChunks.Append(float4(pos.x, pos.y, centerDepth, linearCenterDepth));
+    //_GrassChunks.Append(float4(bounds.center, isOccluded));
+}
+

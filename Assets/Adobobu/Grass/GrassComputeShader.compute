@@ -1,0 +1,225 @@
+
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+#pragma multi_compile _ APPLY_VIEW_OFFSETTING
+
+#include "grass_utils.hlsl"
+
+//#pragma shader_feature APPLY_VIEW_OFFSETTING
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+
+AppendStructuredBuffer<Transform> _GrassTransforms;
+StructuredBuffer<float4> _GrassChunks;
+
+//x = wind value, y = flutter/tilt value, z = sideview offset, w = topview offset
+RWStructuredBuffer<float4> _GrassFrameData;
+
+float _DeltaTime;
+float _Time;
+
+uint _GrassPerChunk;
+float _GrassChunkSize;
+float _TileSize;
+
+float _ChunkCount;
+float _GrassOffsetStrength;
+float4 _GrassScalingRange;
+
+float3 _CameraDirection;
+float3 _CameraPosition;
+
+StructuredBuffer<TerrainData> _TerrainDataBuffer;
+float _TerrainBufferWidth;
+float _TerrainSize;
+float3 _TerrainCenter;
+
+Texture2D<float> _AmbientWindMap;
+float2 _AmbientWindMapSize;
+float3 _AmbientWindCenter;
+float _AmbientWindSize;
+float2 _AmbientWindStrength;
+float _WindDissipation;
+float _GrassWindEffect;
+float2 _AmbientWindDirection;
+
+float _GrassRotOffsetFrameSmoothing;
+float2 _GrassSideViewSmoothRange;
+float2 _GrassTopViewSmoothRange;
+float _GrassSideViewRotOffset;
+float _GrassTopViewRotOffset;
+
+float2 _GrassDefaultFacing;
+float _GrassFacingRandomness;
+float _GrassTilt;
+float _GrassFlutter;
+float _GrassStiffness;
+float _GrassBend;
+float _GrassBendPos;
+float _ChunksPerTile;
+
+float _ValueHolderA;
+float _ValueHolderB;
+float _ValueHolderC;
+
+TerrainData SampleTerrainBufferBilerp(float2 posXZ)
+{
+    float2 uv = ((posXZ - _TerrainCenter.xz) / _TerrainSize) + 0.5;
+    float2 texelPos = uv * _TerrainBufferWidth;
+    int2 floorPos = texelPos;
+    float2 blend = texelPos - floorPos;
+
+    TerrainData xL = _TerrainDataBuffer[getPosBufferIndex(floorPos, _TerrainBufferWidth)];
+    TerrainData xR = _TerrainDataBuffer[getPosBufferIndex(floorPos + int2(1.0, 0.0), _TerrainBufferWidth)];
+    TerrainData xB = _TerrainDataBuffer[getPosBufferIndex(floorPos + int2(0.0, 1.0), _TerrainBufferWidth)];
+    TerrainData xT = _TerrainDataBuffer[getPosBufferIndex(floorPos + int2(1.0, 1.0), _TerrainBufferWidth)];
+    
+    float3 normalX = lerp(xL.normal, xR.normal, blend.x);
+    float3 normalY = lerp(xB.normal, xT.normal, blend.x);
+
+    float3 tangentX = lerp(xL.tangent, xR.tangent, blend.x);
+    float3 tangentY = lerp(xB.tangent, xT.tangent, blend.x);
+
+    float heightX = lerp(xL.height, xR.height, blend.x);
+    float heightY = lerp(xB.height, xT.height, blend.x);
+
+    TerrainData td;
+    td.height = lerp(heightX, heightY, blend.y);
+    td.normal = lerp(normalX, normalY, blend.y);
+    td.tangent = lerp(tangentX, tangentY, blend.y);
+    return td;
+}
+
+float getFlutterValue(float t, float offset)
+{
+    float curveVal = -4.0 * (t - 0.5) * (t - 0.5) + 1.0;
+    return offset * (1.0 - curveVal) + curveVal;
+}
+
+#define accumWind _GrassFrameData[bufferIndex].x
+#define frameTipTime _GrassFrameData[bufferIndex].y
+#define frameSideRotOffset _GrassFrameData[bufferIndex].z
+#define frameTopRotOffset _GrassFrameData[bufferIndex].w
+            
+float4 computeMidAndTipValues(int bufferIndex, float hashVal)
+{
+    float ambientWind = _GrassFrameData[bufferIndex].x;
+    float2 normWind = _AmbientWindStrength;
+    float windSign = sign(ambientWind);
+    float windValue =  saturate(lerp(normWind.x, normWind.y, abs(ambientWind))) * windSign;
+    float absWindValue = abs(windValue);
+    half flutterSpeed = max(2, 8 * absWindValue);
+    half flutterStrength = 0.3;
+    half windFlutter = getFlutterValue(windValue, 0.4) * flutterStrength;
+    
+    float tipTime = frameTipTime + (_DeltaTime * flutterSpeed * _ValueHolderA);
+    frameTipTime = tipTime;
+    float normFlutter = sin(tipTime + hashVal) * 0.5 + lerp(0.2, 0.5, windValue);
+    
+    float2 tipPoint = lerp(float2(_GrassTilt, 1.0 - _GrassTilt), float2(windSign, 0.1), absWindValue + normFlutter * windFlutter * _GrassFlutter);
+    
+    float easeWindValue = easeIn(absWindValue, 3);
+    float2 orthoDir = float2(tipPoint.y, -tipPoint.x);
+    
+    //1.75 = 0.875(valueC) * 2.0
+    float bendNorm = sin(tipTime + hashVal + 1.75) * 0.6 - 0.4;
+    bendNorm = bendNorm * lerp(0.05, 1.0, easeWindValue);
+    float bendValue = lerp(_GrassBend * lerp(-0.2, bendNorm, saturate(_GrassFlutter/0.1)), 0.1 * bendNorm, easeWindValue) * (lerp(4, 0, _GrassStiffness));
+    float2 midPoint = normalize(tipPoint) * _GrassBendPos + orthoDir * bendValue;
+    return float4(midPoint, tipPoint);
+}
+
+
+float3x3 GetViewRotOffset(int bufferIndex, float3 position, float2 facing, float2 bezMidPoint, float2 bezEndPoint, float height, float3x3 facingRotMat)
+{
+    float2 averageBezDir = normalize(bezMidPoint + bezEndPoint) / 2;
+    float3 grassDir = mul(facingRotMat, normalize(float3(0, averageBezDir.y, averageBezDir.x)));
+    float3 normalDir = mul(facingRotMat, normalize(float3(0, averageBezDir.x, -averageBezDir.y)));
+    float3 grassMidPos = position + grassDir * height * 0.5;
+    float3 viewDir = normalize(_CameraPosition - grassMidPos);
+    float2 viewFacing = normalize(float2(viewDir.x, viewDir.z));
+
+    float normalDot = dot(normalDir, viewDir);
+    
+    float topDot = dot(grassDir, viewDir);
+    float smoothTop = smoothstep(_GrassTopViewSmoothRange.x, _GrassTopViewSmoothRange.y, topDot);
+    float topRotDir = lerp(frameTopRotOffset, sign(normalDot), _GrassRotOffsetFrameSmoothing);
+    frameTopRotOffset = topRotDir;
+    
+    float3x3 tiltOffsetRot = getTiltRotation(smoothTop * topRotDir * _GrassTopViewRotOffset);
+    
+    float smoothSide = smoothstep(_GrassSideViewSmoothRange.y, _GrassSideViewSmoothRange.x, abs(normalDot));
+    float sideRotDir = lerp(frameSideRotOffset, -sign(normalDot), _GrassRotOffsetFrameSmoothing);
+    frameSideRotOffset = sideRotDir;
+
+    float2 adjustedFacing = normalize(lerp(facing, viewFacing * sideRotDir, smoothSide * _GrassSideViewRotOffset));
+    float3x3 facingAdjustedRot = getFacingRotation(adjustedFacing);
+    return mul(facingAdjustedRot, tiltOffsetRot);
+}
+
+
+[numthreads(8,8,8)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _GrassPerChunk || id.y >= _GrassPerChunk || id.z >= _ChunkCount)
+        return;
+
+    //float2 chunkPos = float2(id.z % _ChunksPerTile, floor(id.z / _ChunksPerTile));
+    //float2 tilePos = id.xy + chunkPos * _GrassPerChunk;
+    
+    float2 chunkPos2D = _GrassChunks[id.z].xy;
+    float3 chunkCenter = float3(chunkPos2D.x, 0, chunkPos2D.y);
+    
+    Transform newTransform;
+
+    float2 perGrassSize = _GrassChunkSize / _GrassPerChunk;
+    float2 idPos = (id.xy * perGrassSize) - (_GrassChunkSize * 0.5) + (perGrassSize * 0.5);
+    float3 pos = chunkCenter + float3(idPos.x, 0, idPos.y);
+    float2 absPos = abs(pos.xz);
+    float2 randomPos = ((pcg2d(absPos * 73) % 100) / 100.0) * 2.0 - 1.0;
+    newTransform.position = pos + float3(randomPos.x, 0, randomPos.y) * _GrassOffsetStrength;
+
+    float2 randomRot = (pcg2d(absPos * 613) % 100) / 100.0;
+    float2 randomFacing = randomRot * 2.0 - 1.0;
+    float2 facing = normalize(lerp(_GrassDefaultFacing, randomFacing, _GrassFacingRandomness));
+
+    int grassPerTile = _GrassPerChunk * _ChunksPerTile;
+    int2 tileIndex = floor(((pos.xz / _TileSize) + 0.5) * grassPerTile);
+    int bufferIndex = tileIndex.x + (tileIndex.y * grassPerTile);
+    
+    float2 uvPos = ((newTransform.position.xz - _AmbientWindCenter.xz) / _AmbientWindSize) + 0.5;
+    float windSample = _AmbientWindMap[uvPos * _AmbientWindMapSize] * _AmbientWindStrength.y;
+    float2 ambientWind = _AmbientWindDirection * windSample;
+    float windFacingDot = dot(facing, ambientWind);
+
+    accumWind *= lerp(_WindDissipation, 1.0, abs(windFacingDot));
+    accumWind = clamp(accumWind + windFacingDot * _GrassWindEffect, -1.0, 1.0);
+    
+    TerrainData td = SampleTerrainBufferBilerp(newTransform.position.xz);
+    newTransform.position.y = td.height;
+
+    float2 randomScaling = (pcg2d(absPos*57) % 100) / 100.0;
+    newTransform.width = lerp(_GrassScalingRange.x, _GrassScalingRange.y, randomScaling.x);
+    newTransform.height = lerp(_GrassScalingRange.z, _GrassScalingRange.w, randomScaling.y);
+
+    float4 miAndTipValues = computeMidAndTipValues(bufferIndex, 0);
+    float2 bezMidPoint = miAndTipValues.xy;
+    float2 bezEndPoint = miAndTipValues.zw;
+    newTransform.bezierMidPoint = bezMidPoint;
+    newTransform.bezierEndPoint = bezEndPoint;
+    
+    float3x3 facingRotMat = getFacingRotation(facing);
+    
+    #if defined(APPLY_VIEW_OFFSETTING)
+        newTransform.rotation = GetViewRotOffset(bufferIndex, newTransform.position, facing, bezMidPoint, bezEndPoint, newTransform.height, facingRotMat);
+    #else
+        newTransform.rotation = facingRotMat;
+    #endif
+    newTransform.windFactor = float3(_GrassChunks[id.z].zw, 0);
+    //newTransform.windFactor = float3((pos.xz / _TileSize) + 0.5, 0.0);
+    //newTransform.windFactor = float3(newTransform.position.xz / _TileSize + 0.5, 0.0);
+    _GrassTransforms.Append(newTransform);
+
+    //_GrassTransforms.Append(newTransform);
+}

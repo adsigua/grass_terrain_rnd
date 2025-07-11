@@ -1,0 +1,36 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4c557568d503b46429d789a48cec13aa, type: 3}
+  m_Name: GrassRendererData
+  m_EditorClassIdentifier: 
+  grassOffsetStrength: 0
+  grassWidthScaleRange: {x: 0.07, y: 0.09}
+  grassHeightScaleRange: {x: 2.5, y: 3}
+  grassDefaultAngle: 0.251
+  grassDirectionRandomness: 0.283
+  grassOcclusionOffset: 0
+  grassTilt: 0.12
+  grassBend: 0.45
+  grassBendPos: 0.495
+  grassWindDissipation: 0.919
+  grassWindEffect: 0.075
+  grassFlutter: 0.244
+  grassStiffness: 0.19
+  valueHolderA: 0.1
+  valueHolderB: 0.003
+  valueHolderC: -0.4
+  applyViewOffset: 1
+  offsetFrameSmoothing: 0.175
+  sideViewSmoothRange: {x: 0, y: 0.065873}
+  sideViewRotOffset: 0.308
+  topViewSmoothRange: {x: 0.82039684, y: 1}
+  topViewRotOffset: 0.02
